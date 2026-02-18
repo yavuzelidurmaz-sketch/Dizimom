@@ -3,7 +3,6 @@ import time
 import re
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
@@ -15,6 +14,8 @@ def ok_ru_filmleri_getir(profil_id):
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-notifications')
     options.add_argument('--window-size=1920,1080')
+    # ÖNEMLİ: Sitenin mobil sürüm veya eksik sayfa vermesini engellemek için User-Agent ekliyoruz
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
@@ -23,13 +24,13 @@ def ok_ru_filmleri_getir(profil_id):
     driver.get(url)
     time.sleep(5)
     
-    print("Sayfa aşağı kaydırılarak içerikler yükleniyor...")
+    print("Sayfa yavaş yavaş aşağı kaydırılıyor (Görüntülerin yüklenmesi için)...")
     
-    # Sayfayı klavye tuşlarıyla aşağı kaydırma (OK.ru için daha güvenilir yöntem)
-    body = driver.find_element(By.TAG_NAME, 'body')
-    for _ in range(30): # Daha fazla film yüklemek için bu sayıyı artırabilirsiniz
-        body.send_keys(Keys.END)
-        time.sleep(2)
+    # OK.ru gibi siteler tek seferde en alta inmeyi sevmez. 
+    # Adım adım inerek tüm filmlerin isimlerinin DOM'a yüklenmesini zorluyoruz.
+    for _ in range(60): # 60 adım aşağı kaydır (daha çok film için artırabilirsiniz)
+        driver.execute_script("window.scrollBy(0, 800);")
+        time.sleep(1.5)
 
     print("Veriler çekiliyor ve filmler ayıklanıyor...")
     
@@ -39,8 +40,7 @@ def ok_ru_filmleri_getir(profil_id):
     for element in elementler:
         try:
             link = element.get_attribute('href')
-            if not link:
-                continue
+            if not link: continue
                 
             temiz_url = link.split('?')[0]
             match = re.search(r'/video/(\d+)$', temiz_url) 
@@ -49,31 +49,47 @@ def ok_ru_filmleri_getir(profil_id):
                 video_id = match.group(1)
                 temiz_link = f"https://ok.ru/video/{video_id}"
                 
-                # Başlığı farklı yerlerden yakalamayı dene
-                isim = element.get_attribute('title') or element.get_attribute('aria-label') or element.text
-                isim = isim.strip() if isim else ""
+                olasi_isimler = []
                 
-                # Gereksiz kısa yazıları ("View", "1:30" vb.) elemek için filtre
-                if len(isim) > 5 and not isim.isdigit():
-                    # Link daha önce eklendiyse, elimizdeki isim yenisinden kısaysa güncelle (Gerçek başlığı bulmak için)
-                    if temiz_link not in filmler_sozlugu:
-                        filmler_sozlugu[temiz_link] = isim
-                    else:
-                        if len(isim) > len(filmler_sozlugu[temiz_link]):
-                            filmler_sozlugu[temiz_link] = isim
+                # Sitedeki her türlü etiketten isim koparmayı deniyoruz
+                if element.text: olasi_isimler.append(element.text.strip())
+                if element.get_attribute('title'): olasi_isimler.append(element.get_attribute('title').strip())
+                if element.get_attribute('aria-label'): olasi_isimler.append(element.get_attribute('aria-label').strip())
+                
+                # Kapak resimlerinin (thumbnail) içindeki yazıları da çek (Gerçek isim genelde buradadır)
+                resimler = element.find_elements(By.TAG_NAME, 'img')
+                for resim in resimler:
+                    alt_metin = resim.get_attribute('alt')
+                    if alt_metin: olasi_isimler.append(alt_metin.strip())
+                    
+                if temiz_link not in filmler_sozlugu:
+                    filmler_sozlugu[temiz_link] = []
+                    
+                filmler_sozlugu[temiz_link].extend(olasi_isimler)
         except Exception:
             continue
             
-    # Sözlüğü listeye çevir
-    filmler = [{"isim": isim, "link": link} for link, isim in filmler_sozlugu.items()]
+    filmler = []
+    
+    for link, isimler in filmler_sozlugu.items():
+        gecerli_isimler = []
+        for isim in isimler:
+            isim_kucuk = isim.lower()
+            # "View", "1:30" gibi gereksiz verileri ele
+            if len(isim) > 2 and not isim.replace(':', '').isdigit() and isim_kucuk not in ['view', 'views', 'görüntüleme', 'izlenme']:
+                gecerli_isimler.append(isim)
+        
+        if gecerli_isimler:
+            # Olası isimler arasından en uzun ve en mantıklı olanı seç
+            en_iyi_isim = max(gecerli_isimler, key=len)
+            en_iyi_isim = en_iyi_isim.replace('\n', ' - ') # Varsa alt satıra geçişleri temizle
+            filmler.append({"isim": en_iyi_isim, "link": link})
     
     print(f"Toplam {len(filmler)} TEKİL FİLM bulundu. Dosyalar kaydediliyor...")
     
-    # 1. JSON olarak kaydet
     with open('filmler.json', 'w', encoding='utf-8') as f:
         json.dump(filmler, f, ensure_ascii=False, indent=4)
 
-    # 2. IPTV/Media Player için M3U olarak kaydet
     with open('filmler.m3u', 'w', encoding='utf-8') as f:
         f.write("#EXTM3U\n")
         for film in filmler:

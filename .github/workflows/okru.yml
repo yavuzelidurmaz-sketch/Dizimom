@@ -1,9 +1,9 @@
 name: OK.ru Film Scraper
 
 on:
-  workflow_dispatch: # Bu satır sayesinde GitHub panelinden manuel olarak butona basıp çalıştırabilirsiniz.
+  workflow_dispatch: # GitHub panelinden manuel çalıştırmak için
   # schedule:
-  #   - cron: '0 0 * * *' # Başındaki '#' işaretlerini kaldırırsanız her gece yarısı otomatik çalışır.
+  #   - cron: '0 0 * * *' # Her gece otomatik çalışmasını isterseniz başındaki # işaretlerini kaldırın
 
 jobs:
   scrape-and-save:
@@ -29,7 +29,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add filmler.json
-          # Eğer değişiklik yoksa hata vermemesi için "|| exit 0" kullanıyoruz
-          git commit -m "🤖 Filmler listesi güncellendi (Otomatik)" || exit 0
+          git add .
+          git commit -m "🤖 Filmler listesi ve M3U güncellendi" || exit 0
           git push

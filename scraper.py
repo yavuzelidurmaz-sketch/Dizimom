@@ -1,27 +1,33 @@
 import json
 import time
 import re
+import random
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-def limitsiz_kaydir(driver, mesaj):
-    print(f"{mesaj} - Tüm içerik bitene kadar kaydırılıyor...")
+def stealth_scroll(driver, mesaj):
+    print(f"{mesaj} - İnsan taklidi yapılarak rastgele hızlarda kaydırılıyor...")
     last_height = driver.execute_script("return document.body.scrollHeight")
     hareketsiz_kalma = 0
     
     while True:
-        # Bir insan gibi 1500 piksel aşağı kaydır
-        driver.execute_script("window.scrollBy(0, 1500);")
-        time.sleep(2) # Yeni içeriğin internetten inmesi için bekle
+        # İnsan gibi rastgele piksellerde kaydır
+        kaydirma_miktari = random.randint(600, 1400)
+        driver.execute_script(f"window.scrollBy(0, {kaydirma_miktari});")
+        
+        # Sabit değil, küsuratlı rastgele sürelerde bekle (Sitenin bot korumasını aşmak için)
+        bekleme_suresi = random.uniform(2.1, 4.8)
+        time.sleep(bekleme_suresi)
         
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
             hareketsiz_kalma += 1
-            # Sayfa üst üste 5 kez (10 saniye boyunca) hiç uzamadıysa kesinlikle en dipteyiz demektir
-            if hareketsiz_kalma >= 5:
+            # Sayfa inmiyorsa biraz daha uzun bekle ve tekrar dene
+            time.sleep(random.uniform(3.0, 5.0))
+            if hareketsiz_kalma >= 4:
                 break
         else:
             hareketsiz_kalma = 0
@@ -35,7 +41,6 @@ def videolari_ayikla(driver, filmler_sozlugu):
             if not link: continue
                 
             temiz_url = link.split('?')[0]
-            # Sadece tekil filmleri al (Klasör linklerini pas geç)
             match = re.search(r'/video/(\d+)$', temiz_url) 
             
             if match:
@@ -65,19 +70,28 @@ def ok_ru_filmleri_getir(profil_id):
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-notifications')
+    
+    # Çok Önemli: Bot olduğumuzu gizleyen özel Chrome ayarları
+    options.add_argument('--disable-blink-features=AutomationControlled') 
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
     options.add_argument('--window-size=1920,1080')
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    
+    # Tarayıcının 'webdriver' değişkenini sil (Nihai bot gizleme taktiği)
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
     filmler_sozlugu = {}
     
-    # --- 1. ADIM: ANA SAYFAYI LİMİTSİZ TARA VE ALBÜMLERİ BUL ---
+    # --- 1. ADIM: ANA SAYFAYI TARA ---
     ana_url = f"https://ok.ru/profile/{profil_id}/video"
     print(f"Bağlanılıyor: {ana_url}")
     driver.get(ana_url)
-    time.sleep(5)
+    time.sleep(random.uniform(4.5, 6.5))
     
-    limitsiz_kaydir(driver, "Ana Sayfa")
+    stealth_scroll(driver, "Ana Sayfa")
     
     album_linkleri = []
     tum_linkler = driver.find_elements(By.XPATH, "//a[contains(@href, '/video/c')]")
@@ -86,28 +100,24 @@ def ok_ru_filmleri_getir(profil_id):
             href = el.get_attribute('href')
             if href:
                 temiz_href = href.split('?')[0]
-                # Sadece 'c' ile başlayan albüm/klasör linklerini topla
                 if re.search(r'/video/c\d+$', temiz_href) and temiz_href not in album_linkleri:
                     album_linkleri.append(temiz_href)
         except:
             pass
 
-    print(f"Toplam {len(album_linkleri)} albüm/klasör bulundu. Şimdi hepsi tek tek taranacak!")
-    
-    # Ana sayfada klasör dışında duran filmleri de kaçırmayıp havuza at
+    print(f"Toplam {len(album_linkleri)} albüm bulundu. Şimdi hepsi tek tek taranacak!")
     videolari_ayikla(driver, filmler_sozlugu)
 
-    # --- 2. ADIM: ALBÜMLERİN İÇİNE GİR VE LİMİTSİZ TARA ---
+    # --- 2. ADIM: ALBÜMLERİ TARA ---
     for i, album_url in enumerate(album_linkleri, 1):
         print(f"[{i}/{len(album_linkleri)}] Albüm taranıyor: {album_url}")
         driver.get(album_url)
-        time.sleep(4)
+        time.sleep(random.uniform(3.5, 5.5))
         
-        # Albüm içindeki tüm içerik bitene kadar in
-        limitsiz_kaydir(driver, f"Albüm {i}")
+        stealth_scroll(driver, f"Albüm {i}")
         videolari_ayikla(driver, filmler_sozlugu)
 
-    # --- 3. ADIM: İSİMLERİ SÜZ VE DOSYALARI OLUŞTUR ---
+    # --- 3. ADIM: KAYDET ---
     print("Tüm veriler toplandı, liste temizleniyor...")
     filmler = []
     

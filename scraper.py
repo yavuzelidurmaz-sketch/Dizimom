@@ -7,73 +7,41 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-def ok_ru_filmleri_getir(profil_id):
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-notifications')
-    options.add_argument('--window-size=1920,1080')
-    # Sitenin bot olduğumuzu anlamaması için gerçek bir tarayıcı kimliği:
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-    
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
-    url = f"https://ok.ru/profile/{profil_id}/video"
-    print(f"Bağlanılıyor: {url}")
-    driver.get(url)
-    
-    # Sitenin ilk yüklemesi için bekle
-    time.sleep(5)
-    
-    print("Ana sayfa taranıyor. Tüm filmlerin yüklenmesi için sayfa yavaşça en alta kadar kaydırılacak...")
-    print("Bu işlem sayfanın uzunluğuna göre 2-3 dakika sürebilir, lütfen bekleyin.")
-    
-    # ---------------------------------------------------------
-    # AGRESİF VE UZUN SÜRELİ KAYDIRMA (Sadece ana sayfa için)
-    # ---------------------------------------------------------
+def limitsiz_kaydir(driver, mesaj):
+    print(f"{mesaj} - Tüm içerik bitene kadar kaydırılıyor...")
     last_height = driver.execute_script("return document.body.scrollHeight")
-    scroll_denemesi = 0
-    max_scroll = 200 # Çok fazla film varsa bu sayıyı 300-400 yapabilirsiniz
+    hareketsiz_kalma = 0
     
-    for i in range(max_scroll):
-        # Bir insan gibi 800 piksel aşağı kaydır
-        driver.execute_script("window.scrollBy(0, 800);")
-        time.sleep(1.5) # Resimlerin ve yeni linklerin DOM'a düşmesi için bekle
+    while True:
+        # Bir insan gibi 1500 piksel aşağı kaydır
+        driver.execute_script("window.scrollBy(0, 1500);")
+        time.sleep(2) # Yeni içeriğin internetten inmesi için bekle
         
-        # Her 10 kaydırmada bir, sayfanın sonuna gelip gelmediğimizi kontrol et
-        if i % 10 == 0:
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                scroll_denemesi += 1
-                if scroll_denemesi >= 3:
-                    print(f"Sayfanın en sonuna ulaşıldı! (Toplam {i} kez kaydırıldı)")
-                    break # 3 kere kontrol ettik, sayfa daha uzamıyorsa döngüyü kır
-            else:
-                scroll_denemesi = 0
-                last_height = new_height
+        new_height = driver.execute_script("return document.body.scrollHeight")
+        if new_height == last_height:
+            hareketsiz_kalma += 1
+            # Sayfa üst üste 5 kez (10 saniye boyunca) hiç uzamadıysa kesinlikle en dipteyiz demektir
+            if hareketsiz_kalma >= 5:
+                break
+        else:
+            hareketsiz_kalma = 0
+            last_height = new_height
 
-    print("Kaydırma bitti! Şimdi sayfadaki veriler toplanıyor...")
-    
-    filmler_sozlugu = {}
-    # Sayfadaki tüm video linklerini bul
+def videolari_ayikla(driver, filmler_sozlugu):
     elementler = driver.find_elements(By.XPATH, "//a[contains(@href, '/video/')]")
-    
     for element in elementler:
         try:
             link = element.get_attribute('href')
             if not link: continue
                 
             temiz_url = link.split('?')[0]
-            
-            # SADECE TEKİL FİLMLERİ AL (Sonu rakamla bitenler. 'c' ile başlayan klasörleri çöpe at)
+            # Sadece tekil filmleri al (Klasör linklerini pas geç)
             match = re.search(r'/video/(\d+)$', temiz_url) 
             
             if match:
                 video_id = match.group(1)
                 temiz_link = f"https://ok.ru/video/{video_id}"
                 
-                # Film ismini bulabileceğimiz her yere bak
                 olasi_isimler = []
                 if element.text: olasi_isimler.append(element.text.strip())
                 if element.get_attribute('title'): olasi_isimler.append(element.get_attribute('title').strip())
@@ -90,15 +58,63 @@ def ok_ru_filmleri_getir(profil_id):
                 filmler_sozlugu[temiz_link].extend(olasi_isimler)
         except Exception:
             continue
-            
-    print("İsimler filtreleniyor...")
+
+def ok_ru_filmleri_getir(profil_id):
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-notifications')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    filmler_sozlugu = {}
+    
+    # --- 1. ADIM: ANA SAYFAYI LİMİTSİZ TARA VE ALBÜMLERİ BUL ---
+    ana_url = f"https://ok.ru/profile/{profil_id}/video"
+    print(f"Bağlanılıyor: {ana_url}")
+    driver.get(ana_url)
+    time.sleep(5)
+    
+    limitsiz_kaydir(driver, "Ana Sayfa")
+    
+    album_linkleri = []
+    tum_linkler = driver.find_elements(By.XPATH, "//a[contains(@href, '/video/c')]")
+    for el in tum_linkler:
+        try:
+            href = el.get_attribute('href')
+            if href:
+                temiz_href = href.split('?')[0]
+                # Sadece 'c' ile başlayan albüm/klasör linklerini topla
+                if re.search(r'/video/c\d+$', temiz_href) and temiz_href not in album_linkleri:
+                    album_linkleri.append(temiz_href)
+        except:
+            pass
+
+    print(f"Toplam {len(album_linkleri)} albüm/klasör bulundu. Şimdi hepsi tek tek taranacak!")
+    
+    # Ana sayfada klasör dışında duran filmleri de kaçırmayıp havuza at
+    videolari_ayikla(driver, filmler_sozlugu)
+
+    # --- 2. ADIM: ALBÜMLERİN İÇİNE GİR VE LİMİTSİZ TARA ---
+    for i, album_url in enumerate(album_linkleri, 1):
+        print(f"[{i}/{len(album_linkleri)}] Albüm taranıyor: {album_url}")
+        driver.get(album_url)
+        time.sleep(4)
+        
+        # Albüm içindeki tüm içerik bitene kadar in
+        limitsiz_kaydir(driver, f"Albüm {i}")
+        videolari_ayikla(driver, filmler_sozlugu)
+
+    # --- 3. ADIM: İSİMLERİ SÜZ VE DOSYALARI OLUŞTUR ---
+    print("Tüm veriler toplandı, liste temizleniyor...")
     filmler = []
     
     for link, isimler in filmler_sozlugu.items():
         gecerli_isimler = []
         for isim in isimler:
             isim_kucuk = isim.lower()
-            # Kısa/Anlamsız yazıları ele
             if len(isim) > 2 and not isim.replace(':', '').isdigit() and isim_kucuk not in ['view', 'views', 'görüntüleme', 'izlenme', 'izlenme sayısı']:
                 gecerli_isimler.append(isim)
         
@@ -107,7 +123,7 @@ def ok_ru_filmleri_getir(profil_id):
             en_iyi_isim = en_iyi_isim.replace('\n', ' - ') 
             filmler.append({"isim": en_iyi_isim, "link": link})
     
-    print(f"İŞLEM TAMAMLANDI! Toplam {len(filmler)} TEKİL FİLM bulundu.")
+    print(f"MÜTHİŞ! Tüm tarama bitti. Toplam {len(filmler)} ADET FİLM bulundu. Dosyalara yazılıyor...")
     
     with open('filmler.json', 'w', encoding='utf-8') as f:
         json.dump(filmler, f, ensure_ascii=False, indent=4)
